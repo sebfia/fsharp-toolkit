@@ -16,6 +16,12 @@ let inline tryGetConfigValue key (c: IConfiguration) =
     | s when (String.IsNullOrWhiteSpace s |> not) -> Some (Regex.Replace(s, @"\s+", ""))
     | _ -> None
 
+let inline tryGetConfigValueWithDefault<'a> key (defaultValue: 'a) (c: IConfiguration) =
+    if isNull c then defaultValue else
+    try 
+        c.GetValue<'a>(key, defaultValue)
+    with _ -> defaultValue
+
 let inline tryGetSectionValue section key (c: IConfiguration) =
     if isNull c then None else
     try 
