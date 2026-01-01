@@ -40,6 +40,19 @@ let inline tryGetSectionMap<'key,'value> section key mapKeyName mapValueName (c:
         c.GetSection(sprintf "%s:%s" section key).GetChildren() |> Seq.map (fun x -> x.GetValue<'key>(mapKeyName),x.GetValue<'value>(mapValueName)) |> Seq.toArray |> Some
     with _ -> None
 
+let inline tryGetSectionObjectArray<'T> section key (mapper: IConfigurationSection -> 'T option) (c: IConfiguration) =
+    if isNull c then None else
+    try
+        let sectionPath = sprintf "%s:%s" section key
+        let children = c.GetSection(sectionPath).GetChildren() |> Seq.toList
+        if List.isEmpty children then None else
+        children
+        |> List.choose mapper
+        |> function
+            | [] -> None
+            | items -> Some items
+    with _ -> None
+
 let inline enumToList<'a> = (Enum.GetValues(typeof<'a>) :?> ('a [])) |> Array.toList
 
 let inline private mapTryFindReplacement (m: Text.RegularExpressions.Match) map : string option =
@@ -92,3 +105,25 @@ let inline isRunningInDocker() =
     (File.Exists("/proc/1/cgroup") &&
      let content = File.ReadAllText("/proc/1/cgroup")
      content.Contains("docker") || content.Contains("kubepods"))
+
+/// Parse QuestDB connection string (format: "http://host:port")
+/// Returns tuple of (baseUrl, ingressPort) with defaults if parsing fails
+let inline parseQuestDbConnectionString connectionString =
+    try
+        let uri = Uri connectionString
+        let baseUrl = sprintf "%s://%s" uri.Scheme uri.Host
+        let port = if uri.Port > 0 then uri.Port else 9009
+        baseUrl, port
+    with _ ->
+        "http://localhost", 9009
+
+/// Get QuestDB connection from config
+/// Priority: 1) ConnectionStrings:questdb, 2) Legacy QuestDb + QuestDbIngressPort, 3) Default
+let inline getQuestDbConnection (c: IConfiguration) =
+    match c.["ConnectionStrings:questdb"] |> Option.ofObj with
+    | Some connStr -> parseQuestDbConnectionString connStr
+    | None ->
+        // Legacy fallback
+        let baseUrl = c |> tryGetConfigValue "QuestDb" |> Option.defaultValue "http://localhost"
+        let port = c |> tryGetConfigValueWithDefault "QuestDbIngressPort" 9009
+        baseUrl, port
