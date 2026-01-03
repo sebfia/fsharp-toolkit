@@ -26,14 +26,25 @@ type HealthCheckServer(healthCheckService: HealthCheckService, logger: ILogger<H
                     let builder = WebApplication.CreateBuilder()
 
                     // Allow configuration override via HEALTHCHECK_URLS environment variable
-                    // Falls back to ASPIRE convention or default localhost binding
+                    // Falls back to a secure localhost binding for dev, but binds to all interfaces in containers/Kubernetes
                     let urls =
                         configuration.["HEALTHCHECK_URLS"]
                         |> Option.ofObj
                         |> Option.defaultWith (fun () ->
-                            // Use localhost by default for better security
-                            // Aspire/Kubernetes can override via environment variable if needed
-                            $"http://localhost:{port}")
+                            // Kubernetes liveness/readiness probes hit the Pod IP, so we must not bind to localhost there.
+                            // Keep localhost for dev by default to avoid exposing the endpoint unintentionally.
+                            let isRunningInContainer =
+                                match Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") with
+                                | null -> false
+                                | v -> v.Equals("true", StringComparison.OrdinalIgnoreCase)
+
+                            let isRunningInKubernetes =
+                                not (isNull (Environment.GetEnvironmentVariable("KUBERNETES_SERVICE_HOST")))
+
+                            if isRunningInContainer || isRunningInKubernetes then
+                                $"http://0.0.0.0:{port}"
+                            else
+                                $"http://localhost:{port}")
 
                     logger.LogInformation($"🔧 Health check server URLs: {urls}")
                     builder.WebHost.UseUrls(urls) |> ignore
