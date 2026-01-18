@@ -9,18 +9,18 @@ open Microsoft.Extensions.Logging
 
 /// Health check based on actual service errors tracked in ServiceHealthStore
 /// This provides real operational health status, not just "does the client exist"
-type ServiceHealthCheck(healthStore: ServiceHealthStore, logger: ILogger<ServiceHealthCheck>) =
+type ServiceHealthCheck(serviceName: string, healthStore: ServiceHealthStore, logger: ILogger<ServiceHealthCheck>) =
 
     interface IHealthCheck with
         member _.CheckHealthAsync(context, cancellationToken) =
             task {
-                logger.LogDebug("Executing service health check...")
+                logger.LogDebug("[{ServiceName}] Executing service health check...", serviceName)
 
                 let errors = healthStore.GetErrors()
 
                 if healthStore.IsHealthy() then
-                    logger.LogDebug("Service is healthy - no errors recorded")
-                    return HealthCheckResult.Healthy("Service is operating normally")
+                    logger.LogDebug("[{ServiceName}] Service is healthy - no errors recorded", serviceName)
+                    return HealthCheckResult.Healthy($"[{serviceName}] Service is operating normally")
 
                 elif healthStore.HasNonResolvableErrors() then
                     // Non-resolvable errors mean the service cannot function properly
@@ -30,13 +30,13 @@ type ServiceHealthCheck(healthStore: ServiceHealthStore, logger: ILogger<Service
                         |> List.filter (fun e -> e.Severity = NonResolvable)
 
                     let errorDetails = StringBuilder()
-                    errorDetails.AppendLine("Non-resolvable errors detected:") |> ignore
+                    errorDetails.AppendLine($"[{serviceName}] Non-resolvable errors detected:") |> ignore
 
                     for error in nonResolvableErrors do
                         errorDetails.AppendLine($"  - [{error.Component}] {error.Message}") |> ignore
 
                     let message = errorDetails.ToString()
-                    logger.LogError(message)
+                    logger.LogError("[{ServiceName}] {Message}", serviceName, message)
 
                     // Create detailed data for debugging
                     let data = readOnlyDict [
@@ -54,14 +54,14 @@ type ServiceHealthCheck(healthStore: ServiceHealthStore, logger: ILogger<Service
                         |> List.filter (fun e -> e.Severity = Resolvable)
 
                     let errorDetails = StringBuilder()
-                    errorDetails.AppendLine("Resolvable errors detected (dependencies unavailable):") |> ignore
+                    errorDetails.AppendLine($"[{serviceName}] Resolvable errors detected (dependencies unavailable):") |> ignore
 
                     for error in resolvableErrors do
                         let age = DateTimeOffset.UtcNow - error.Timestamp
                         errorDetails.AppendLine($"  - [{error.Component}] {error.Message} (age: {age.TotalSeconds:F0}s)") |> ignore
 
                     let message = errorDetails.ToString()
-                    logger.LogWarning(message)
+                    logger.LogWarning("[{ServiceName}] {Message}", serviceName, message)
 
                     // Create detailed data for debugging
                     let data = readOnlyDict [
@@ -74,17 +74,17 @@ type ServiceHealthCheck(healthStore: ServiceHealthStore, logger: ILogger<Service
 
                 else
                     // Should not reach here, but return healthy as fallback
-                    return HealthCheckResult.Healthy("Service is operating normally")
+                    return HealthCheckResult.Healthy($"[{serviceName}] Service is operating normally")
             }
 
 /// Liveness-only health check - only checks for non-resolvable errors
 /// This should ONLY fail if the service needs to be restarted
-type LivenessHealthCheck(healthStore: ServiceHealthStore, logger: ILogger<LivenessHealthCheck>) =
+type LivenessHealthCheck(serviceName: string, healthStore: ServiceHealthStore, logger: ILogger<LivenessHealthCheck>) =
 
     interface IHealthCheck with
         member _.CheckHealthAsync(context, cancellationToken) =
             task {
-                logger.LogDebug("Executing liveness health check...")
+                logger.LogDebug("[{ServiceName}] Executing liveness health check...", serviceName)
 
                 if healthStore.HasNonResolvableErrors() then
                     let errors =
@@ -96,13 +96,13 @@ type LivenessHealthCheck(healthStore: ServiceHealthStore, logger: ILogger<Livene
                         |> List.map (fun e -> $"[{e.Component}] {e.Message}")
                         |> String.concat "; "
 
-                    let message = $"Service has non-resolvable errors: {errorSummary}"
-                    logger.LogCritical(message)
+                    let message = $"[{serviceName}] Service has non-resolvable errors: {errorSummary}"
+                    logger.LogCritical("[{ServiceName}] {Message}", serviceName, message)
 
                     return HealthCheckResult.Unhealthy(message)
                 else
-                    logger.LogDebug("Service is alive - no non-resolvable errors")
-                    return HealthCheckResult.Healthy("Service process is alive")
+                    logger.LogDebug("[{ServiceName}] Service is alive - no non-resolvable errors", serviceName)
+                    return HealthCheckResult.Healthy($"[{serviceName}] Service process is alive")
             }
 
 /// Extension methods for adding health checks
@@ -113,18 +113,28 @@ module ServiceHealthCheckExtensions =
     type IHealthChecksBuilder with
         /// Add service health check (readiness) - checks all errors
         /// Tagged as "ready" - affects /health endpoint
-        member this.AddServiceHealthCheck() =
+        member this.AddServiceHealthCheck(serviceName: string) =
+            this.Services.AddSingleton<ServiceHealthCheck>(fun sp ->
+                let healthStore = sp.GetRequiredService<ServiceHealthStore>()
+                let logger = sp.GetRequiredService<ILogger<ServiceHealthCheck>>()
+                ServiceHealthCheck(serviceName, healthStore, logger)
+            ) |> ignore
             this.AddCheck<ServiceHealthCheck>(
-                "service",
+                $"{serviceName}-service",
                 tags = [| "ready" |],
                 failureStatus = HealthStatus.Degraded  // Degraded, not Unhealthy
             )
 
         /// Add liveness health check - only checks non-resolvable errors
         /// Tagged as "live" - affects /alive endpoint
-        member this.AddLivenessHealthCheck() =
+        member this.AddLivenessHealthCheck(serviceName: string) =
+            this.Services.AddSingleton<LivenessHealthCheck>(fun sp ->
+                let healthStore = sp.GetRequiredService<ServiceHealthStore>()
+                let logger = sp.GetRequiredService<ILogger<LivenessHealthCheck>>()
+                LivenessHealthCheck(serviceName, healthStore, logger)
+            ) |> ignore
             this.AddCheck<LivenessHealthCheck>(
-                "liveness",
+                $"{serviceName}-liveness",
                 tags = [| "live" |],
                 failureStatus = HealthStatus.Unhealthy
             )

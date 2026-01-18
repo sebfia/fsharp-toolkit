@@ -11,47 +11,66 @@ let inline tryGetEnvironmentVariable name =
     | s -> Some s
 
 let inline tryGetConfigValue key (c: IConfiguration) =
-    if isNull c then None else
-    match c.[key] with
-    | s when (String.IsNullOrWhiteSpace s |> not) -> Some (Regex.Replace(s, @"\s+", ""))
-    | _ -> None
+    c
+    |> Option.ofObj
+    |> Option.bind (fun config ->
+        match config.[key] with
+        | s when (String.IsNullOrWhiteSpace s |> not) -> Some (Regex.Replace(s, @"\s+", ""))
+        | _ -> None)
 
 let inline tryGetConfigValueWithDefault<'a> key (defaultValue: 'a) (c: IConfiguration) =
-    if isNull c then defaultValue else
-    try 
-        c.GetValue<'a>(key, defaultValue)
-    with _ -> defaultValue
+    c
+    |> Option.ofObj
+    |> Option.map (fun config ->
+        try 
+            config.GetValue<'a>(key, defaultValue)
+        with _ -> defaultValue)
+    |> Option.defaultValue defaultValue
 
 let inline tryGetSectionValue section key (c: IConfiguration) =
-    if isNull c then None else
-    try 
-        c.GetSection(sprintf "%s:%s" section key).Value |> Some
-    with _ -> None
+    c
+    |> Option.ofObj
+    |> Option.bind (fun config ->
+        try 
+            config.GetSection(sprintf "%s:%s" section key).Value |> Some
+        with _ -> None)
 
 let inline tryGetSectionArray section key (c: IConfiguration) =
-    if isNull c then None else
-    try
-        c.GetSection(sprintf "%s:%s" section key).GetChildren() |> Seq.map (fun x -> x.Value) |> Seq.toArray |> Some
-    with _ -> None
+    c
+    |> Option.ofObj
+    |> Option.bind (fun config ->
+        try
+            config.GetSection(sprintf "%s:%s" section key).GetChildren()
+            |> Seq.map (fun x -> x.Value)
+            |> Seq.toArray
+            |> Some
+        with _ -> None)
 
 let inline tryGetSectionMap<'key,'value> section key mapKeyName mapValueName (c: IConfiguration) =
-    if isNull c then None else
-    try
-        c.GetSection(sprintf "%s:%s" section key).GetChildren() |> Seq.map (fun x -> x.GetValue<'key>(mapKeyName),x.GetValue<'value>(mapValueName)) |> Seq.toArray |> Some
-    with _ -> None
+    c
+    |> Option.ofObj
+    |> Option.bind (fun config ->
+        try
+            config.GetSection(sprintf "%s:%s" section key).GetChildren()
+            |> Seq.map (fun x -> x.GetValue<'key>(mapKeyName), x.GetValue<'value>(mapValueName))
+            |> Seq.toArray
+            |> Some
+        with _ -> None)
 
 let inline tryGetSectionObjectArray<'T> section key (mapper: IConfigurationSection -> 'T option) (c: IConfiguration) =
-    if isNull c then None else
-    try
-        let sectionPath = sprintf "%s:%s" section key
-        let children = c.GetSection(sectionPath).GetChildren() |> Seq.toList
-        if List.isEmpty children then None else
-        children
-        |> List.choose mapper
-        |> function
-            | [] -> None
-            | items -> Some items
-    with _ -> None
+    c
+    |> Option.ofObj
+    |> Option.bind (fun config ->
+        try
+            let sectionPath = sprintf "%s:%s" section key
+            let children = config.GetSection(sectionPath).GetChildren() |> Seq.toList
+            if List.isEmpty children then None else
+            children
+            |> List.choose mapper
+            |> function
+                | [] -> None
+                | items -> Some items
+        with _ -> None)
 
 let inline enumToList<'a> = (Enum.GetValues(typeof<'a>) :?> ('a [])) |> Array.toList
 

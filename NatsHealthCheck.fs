@@ -10,41 +10,32 @@ open NATS.Client.Core
 /// Health check for NATS connection
 /// This checks if NATS is actually connected and responsive
 /// Tagged with "ready" - only affects readiness, not liveness
-type NatsHealthCheck(natsClient: INatsClient, logger: ILogger<NatsHealthCheck>) =
+type NatsHealthCheck(serviceName: string, natsClient: INatsClient, logger: ILogger<NatsHealthCheck>) =
     interface IHealthCheck with
         member _.CheckHealthAsync(context, cancellationToken) =
             task {
                 try
-                    logger.LogDebug("Checking NATS connection health...")
+                    logger.LogDebug("[{ServiceName}] Checking NATS connection health...", serviceName)
 
-                    // Try to cast to NatsConnection to check connection state
-                    match natsClient with
-                    | :? NatsConnection as conn ->
-                        // Check if connection is established
-                        // NatsConnection doesn't expose connection state directly,
-                        // but if we got here and the client exists, it's likely configured
+                    // Check if client exists, then verify connection type
+                    match Option.ofObj natsClient with
+                    | None ->
+                        logger.LogWarning("[{ServiceName}] NATS client is null", serviceName)
+                        return HealthCheckResult.Unhealthy($"[{serviceName}] NATS client is not configured")
 
-                        // We could try a simple operation to verify connectivity
-                        // For now, we'll check if the client is not null and properly configured
-                        if obj.ReferenceEquals(conn, null) then
-                            logger.LogWarning("NATS connection is null")
-                            return HealthCheckResult.Unhealthy("NATS connection is null")
-                        else
-                            logger.LogDebug("NATS connection appears healthy")
-                            return HealthCheckResult.Healthy("NATS connection is established")
+                    | Some (:? NatsConnection) ->
+                        // NatsConnection type - direct connection established
+                        logger.LogDebug("[{ServiceName}] NATS connection appears healthy", serviceName)
+                        return HealthCheckResult.Healthy($"[{serviceName}] NATS connection is established")
 
-                    | _ ->
-                        // For NatsClient (not NatsConnection), just verify it exists
-                        if obj.ReferenceEquals(natsClient, null) then
-                            logger.LogWarning("NATS client is null")
-                            return HealthCheckResult.Unhealthy("NATS client is not configured")
-                        else
-                            logger.LogDebug("NATS client is configured")
-                            return HealthCheckResult.Healthy("NATS client is configured")
+                    | Some _ ->
+                        // Other INatsClient implementation (e.g., NatsClient wrapper)
+                        logger.LogDebug("[{ServiceName}] NATS client is configured", serviceName)
+                        return HealthCheckResult.Healthy($"[{serviceName}] NATS client is configured")
 
                 with ex ->
-                    logger.LogError(ex, "NATS health check failed with exception")
-                    return HealthCheckResult.Unhealthy("NATS health check failed", ex)
+                    logger.LogError(ex, "[{ServiceName}] NATS health check failed with exception", serviceName)
+                    return HealthCheckResult.Unhealthy($"[{serviceName}] NATS health check failed", ex)
             }
 
 /// Extension methods for adding NATS health check
@@ -54,9 +45,14 @@ module NatsHealthCheckExtensions =
 
     type IHealthChecksBuilder with
         /// Add NATS health check (tagged as "ready" - only affects readiness probe)
-        member this.AddNatsHealthCheck() =
+        member this.AddNatsHealthCheck(serviceName: string) =
+            this.Services.AddSingleton<NatsHealthCheck>(fun sp ->
+                let natsClient = sp.GetRequiredService<INatsClient>()
+                let logger = sp.GetRequiredService<ILogger<NatsHealthCheck>>()
+                NatsHealthCheck(serviceName, natsClient, logger)
+            ) |> ignore
             this.AddCheck<NatsHealthCheck>(
-                "nats",
+                $"{serviceName}-nats",
                 tags = [| "ready" |],  // Only affects /health, not /alive
                 failureStatus = HealthStatus.Unhealthy
             )
