@@ -123,6 +123,9 @@ type HealthCheckServer(serviceName: string, healthCheckService: HealthCheckServi
                             else
                                 $"http://localhost:{port}/")  // Localhost only for dev
 
+                    // HttpListener requires URI prefixes to end with '/'
+                    let urls = if urls.EndsWith("/") then urls else urls + "/"
+
                     logger.LogInformation("[{ServiceName}] 🔧 Health check server URLs: {Urls}", serviceName, urls)
 
                     let listener = new HttpListener()
