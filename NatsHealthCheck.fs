@@ -78,22 +78,14 @@ type NatsHealthCheck(serviceName: string, natsClient: INatsClient, logger: ILogg
                         return HealthCheckResult.Unhealthy($"[{serviceName}] NATS client is not configured")
 
                     | Some client ->
-                        // `INatsClient.Connection` exposes the underlying connection for
-                        // both NatsConnection and the NatsClient wrapper.
-                        let connection =
-                            match client with
-                            | :? NatsConnection as c -> Some c
-                            | _ -> client.Connection |> Option.ofObj |> Option.bind (fun c ->
-                                       match c with
-                                       | :? NatsConnection as nc -> Some nc
-                                       | _ -> None)
-
-                        match connection with
+                        // `INatsClient.Connection` is the interface every client
+                        // (NatsConnection itself, the NatsClient wrapper) exposes, and
+                        // INatsConnection carries the state and server info, so no
+                        // cast to a concrete type is needed.
+                        match Option.ofObj client.Connection with
                         | None ->
-                            // Unknown INatsClient implementation (e.g. a test double);
-                            // we cannot inspect state, so don't fail readiness on it.
-                            logger.LogDebug("[{ServiceName}] NATS client type does not expose connection state", serviceName)
-                            return HealthCheckResult.Healthy($"[{serviceName}] NATS client is configured (state not observable)")
+                            logger.LogWarning("[{ServiceName}] NATS client has no connection", serviceName)
+                            return HealthCheckResult.Unhealthy($"[{serviceName}] NATS client has no connection")
 
                         | Some conn ->
                             let state = conn.ConnectionState

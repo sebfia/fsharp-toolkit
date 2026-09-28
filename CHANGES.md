@@ -37,6 +37,8 @@ above, so a probe no longer writes two Information lines.
 Reads the NATS connection state instead of checking that a client object exists:
 `Open` → Healthy, `Connecting`/`Reconnecting` → Degraded (fails readiness, not
 liveness), `Closed`/`Failed` → Unhealthy.
+The state is read through `INatsClient.Connection` (`INatsConnection`), so any
+client implementation is checked; a client without a connection is Unhealthy.
 
 ### ServiceHealthCheck
 
