@@ -12,7 +12,7 @@ open Microsoft.Extensions.Logging
 type ServiceHealthCheck(serviceName: string, healthStore: ServiceHealthStore, logger: ILogger<ServiceHealthCheck>) =
 
     interface IHealthCheck with
-        member _.CheckHealthAsync(context, cancellationToken) =
+        member _.CheckHealthAsync(_context, _cancellationToken) =
             task {
                 logger.LogDebug("[{ServiceName}] Executing service health check...", serviceName)
 
@@ -82,7 +82,7 @@ type ServiceHealthCheck(serviceName: string, healthStore: ServiceHealthStore, lo
 type LivenessHealthCheck(serviceName: string, healthStore: ServiceHealthStore, logger: ILogger<LivenessHealthCheck>) =
 
     interface IHealthCheck with
-        member _.CheckHealthAsync(context, cancellationToken) =
+        member _.CheckHealthAsync(_context, _cancellationToken) =
             task {
                 logger.LogDebug("[{ServiceName}] Executing liveness health check...", serviceName)
 
